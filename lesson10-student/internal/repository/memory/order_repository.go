@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 
 	"example.com/order-service/internal/order"
 )
@@ -19,21 +20,61 @@ func NewOrderRepository() *OrderRepository {
 }
 
 func (r *OrderRepository) Create(_ context.Context, value order.Order) (order.Order, error) {
-	// TODO: assign an ID and store the order.
-	return order.Order{}, order.ErrNotImplemented
+	toSave := cloneOrder(value)
+	toSave.ID = r.nextID
+	r.nextID++
+
+	r.items = append(r.items, toSave)
+
+	return cloneOrder(toSave), nil
 }
 
 func (r *OrderRepository) GetByID(_ context.Context, id int64) (order.Order, error) {
-	// TODO: return ErrOrderNotFound when the order does not exist.
-	return order.Order{}, order.ErrNotImplemented
+	for _, item := range r.items {
+		if id == item.ID {
+			return cloneOrder(item), nil
+		}
+	}
+
+	return order.Order{}, fmt.Errorf("order %d: %w", id, order.ErrOrderNotFound)
 }
 
 func (r *OrderRepository) List(_ context.Context) ([]order.Order, error) {
-	// TODO: return all stored orders in creation order without exposing mutable internal state.
-	return nil, order.ErrNotImplemented
+	res := make([]order.Order, 0, len(r.items))
+
+	for _, item := range r.items {
+		res = append(res, cloneOrder(item))
+	}
+
+	return res, nil
 }
 
 func (r *OrderRepository) Update(_ context.Context, value order.Order) (order.Order, error) {
-	// TODO: replace an existing order or return ErrOrderNotFound.
-	return order.Order{}, order.ErrNotImplemented
+	for i := range r.items {
+		if value.ID == r.items[i].ID {
+			toSave := cloneOrder(value)
+			r.items[i] = toSave
+
+			return cloneOrder(toSave), nil
+		}
+	}
+
+	return order.Order{}, fmt.Errorf("order %d: %w", value.ID, order.ErrOrderNotFound)
+}
+
+// Нужен, чтобы потом было проще добавить работу с бд, да и в общем для идиоматичности
+func cloneOrder(o order.Order) order.Order {
+	cloned := o
+
+	if nil != o.Items {
+		cloned.Items = make([]order.Item, len(o.Items))
+		copy(cloned.Items, o.Items)
+	}
+
+	if nil != o.History {
+		cloned.History = make([]order.StatusChange, len(o.History))
+		copy(cloned.History, o.History)
+	}
+
+	return cloned
 }
