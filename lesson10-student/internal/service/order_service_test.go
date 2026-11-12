@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 	"example.com/order-service/internal/service"
 )
 
-// Чтобы тестировать именно сервис
+// Для тестов именно сервиса
 type dummyRepository struct {
 	orders []order.Order
 	nextID int64
@@ -58,30 +59,51 @@ func (d *dummyRepository) addOrder(status order.Status) int64 {
 	d.orders = append(d.orders, order.Order{
 		ID:      id,
 		Status:  status,
-		History: []order.StatusChange{{Status: status, ChangedAt: time.Now()}},
+		History: []order.StatusChange{{Status: status, ChangedAt: time.Now().UTC()}},
 	})
 	return id
 }
 
 func TestCreate(t *testing.T) {
-	svc := service.NewOrderService(newDummyRepository())
-
-	created, err := svc.Create(context.Background(), order.CreateOrderInput{
-		Items: []order.Item{
+	tests := []struct {
+		name      string
+		items     []order.Item
+		wantTotal int64
+		wantName  string
+	}{
+		{"одна позиция", []order.Item{
+			{Name: "Keyboard", Quantity: 1, Price: 500000},
+		}, 500000, "Keyboard"},
+		{"несколько штук одной позиции", []order.Item{
+			{Name: "Mouse", Quantity: 3, Price: 150000},
+		}, 450000, "Mouse"},
+		{"несколько позиций", []order.Item{
 			{Name: "Keyboard", Quantity: 1, Price: 500000},
 			{Name: "Mouse", Quantity: 2, Price: 150000},
-		},
-	})
+		}, 800000, "Keyboard"},
+		{"пробелы в названии обрезаются", []order.Item{
+			{Name: "   Keyboard ", Quantity: 1, Price: 100},
+		}, 100, "Keyboard"},
+	}
 
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), created.ID)
-	assert.Equal(t, order.StatusNew, created.Status)
-	assert.Equal(t, int64(800000), created.TotalPrice)
-	require.Len(t, created.History, 1)
-	assert.Equal(t, order.StatusNew, created.History[0].Status)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := service.NewOrderService(newDummyRepository())
+
+			created, err := svc.Create(context.Background(), order.CreateOrderInput{Items: tt.items})
+
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), created.ID)
+			assert.Equal(t, tt.wantTotal, created.TotalPrice)
+			assert.Equal(t, tt.wantName, created.Items[0].Name)
+			assert.Equal(t, order.StatusNew, created.Status)
+			require.Len(t, created.History, 1)
+			assert.Equal(t, order.StatusNew, created.History[0].Status)
+		})
+	}
 }
 
-func TestCreate_Validation(t *testing.T) {
+func TestCreateValidation(t *testing.T) {
 	tests := []struct {
 		name  string
 		items []order.Item
@@ -92,6 +114,11 @@ func TestCreate_Validation(t *testing.T) {
 		{"отрицательное количество", []order.Item{{Name: "Mouse", Quantity: -1, Price: 100}}},
 		{"нулевая цена", []order.Item{{Name: "Mouse", Quantity: 1, Price: 0}}},
 		{"отрицательная цена", []order.Item{{Name: "Mouse", Quantity: 1, Price: -100}}},
+		{"переполнение позиции", []order.Item{{Name: "Mouse", Quantity: math.MaxInt32, Price: math.MaxInt64 / 2}}},
+		{"переполнение суммы", []order.Item{
+			{Name: "Mouse", Quantity: 1, Price: math.MaxInt64},
+			{Name: "Keyboard", Quantity: 1, Price: 1},
+		}},
 	}
 
 	for _, tt := range tests {
@@ -105,21 +132,44 @@ func TestCreate_Validation(t *testing.T) {
 	}
 }
 
-func TestGetByIDAndList(t *testing.T) {
+func TestGetByID(t *testing.T) {
 	repo := newDummyRepository()
 	id := repo.addOrder(order.StatusNew)
 	svc := service.NewOrderService(repo)
 
-	found, err := svc.GetByID(context.Background(), id)
-	require.NoError(t, err)
-	assert.Equal(t, id, found.ID)
+	tests := []struct {
+		name    string
+		id      int64
+		wantErr error
+	}{
+		{"существующий заказ", id, nil},
+		{"несуществующий заказ", 999, order.ErrOrderNotFound},
+	}
 
-	_, err = svc.GetByID(context.Background(), 999)
-	assert.ErrorIs(t, err, order.ErrOrderNotFound)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			found, err := svc.GetByID(context.Background(), tt.id)
+
+			if nil != tt.wantErr {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.id, found.ID)
+		})
+	}
+}
+
+func TestList(t *testing.T) {
+	repo := newDummyRepository()
+	repo.addOrder(order.StatusNew)
+	repo.addOrder(order.StatusProcessing)
+	svc := service.NewOrderService(repo)
 
 	list, err := svc.List(context.Background())
+
 	require.NoError(t, err)
-	assert.Len(t, list, 1)
+	assert.Len(t, list, 2)
 }
 
 func TestUpdateStatus(t *testing.T) {
@@ -137,6 +187,7 @@ func TestUpdateStatus(t *testing.T) {
 		{"from processing to new", order.StatusProcessing, order.StatusNew, order.ErrInvalidStatusTransition},
 		{"from completed to cancelled", order.StatusCompleted, order.StatusCancelled, order.ErrInvalidStatusTransition},
 		{"from cancelled to processing", order.StatusCancelled, order.StatusProcessing, order.ErrInvalidStatusTransition},
+		{"unknown status", order.StatusNew, "shipped", order.ErrInvalidStatus},
 	}
 
 	for _, tt := range tests {
@@ -147,12 +198,17 @@ func TestUpdateStatus(t *testing.T) {
 
 			updated, err := svc.UpdateStatus(context.Background(), id, tt.to)
 
+			history, historyErr := svc.History(context.Background(), id)
+			require.NoError(t, historyErr)
+
 			if nil != tt.wantErr {
 				assert.ErrorIs(t, err, tt.wantErr)
+				assert.Len(t, history, 1)
 				return
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.to, updated.Status)
+			assert.Len(t, history, 2)
 		})
 	}
 }
@@ -180,4 +236,12 @@ func TestHistory(t *testing.T) {
 	assert.Equal(t, order.StatusCompleted, history[2].Status)
 	assert.False(t, history[2].ChangedAt.Before(history[1].ChangedAt))
 	assert.False(t, history[1].ChangedAt.Before(history[0].ChangedAt))
+}
+
+func TestHistoryNotFound(t *testing.T) {
+	svc := service.NewOrderService(newDummyRepository())
+
+	_, err := svc.History(context.Background(), 999)
+
+	assert.ErrorIs(t, err, order.ErrOrderNotFound)
 }

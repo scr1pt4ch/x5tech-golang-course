@@ -1,0 +1,253 @@
+basePath: /
+definitions:
+  handler.errorResponse:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+    type: object
+  order.CreateOrderInput:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/order.Item'
+        type: array
+    type: object
+  order.Item:
+    properties:
+      name:
+        type: string
+      price:
+        type: integer
+      quantity:
+        type: integer
+    type: object
+  order.Order:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/order.Item'
+        type: array
+      status:
+        $ref: '#/definitions/order.Status'
+      total_price:
+        type: integer
+    type: object
+  order.Status:
+    enum:
+    - new
+    - processing
+    - completed
+    - cancelled
+    type: string
+    x-enum-varnames:
+    - StatusNew
+    - StatusProcessing
+    - StatusCompleted
+    - StatusCancelled
+  order.StatusChange:
+    properties:
+      changed_at:
+        type: string
+      status:
+        $ref: '#/definitions/order.Status'
+    type: object
+  order.UpdateStatusInput:
+    properties:
+      status:
+        $ref: '#/definitions/order.Status'
+    type: object
+info:
+  contact: {}
+  description: |-
+    Учебный сервис заказов: создание заказа, смена статуса и история статусов.
+    Заказы хранятся в памяти и пропадают после перезапуска.
+    Все ошибки приходят в формате {"error": "...", "code": "..."}.
+  title: Order Service API
+  version: "1.0"
+paths:
+  /api/v1/orders:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/order.Order'
+            type: array
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Список всех заказов
+      tags:
+      - orders
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Сумма заказа считается на сервере, статус нового заказа — new.
+        Названия позиций сохраняются без пробелов по краям.
+      parameters:
+      - description: Позиции заказа
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/order.CreateOrderInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              description: Адрес созданного заказа, например /api/v1/orders/1
+              type: string
+          schema:
+            $ref: '#/definitions/order.Order'
+        "400":
+          description: INVALID_JSON или INVALID_ORDER
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Создать заказ
+      tags:
+      - orders
+  /api/v1/orders/{id}:
+    get:
+      parameters:
+      - description: Номер заказа
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/order.Order'
+        "400":
+          description: INVALID_ID
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: ORDER_NOT_FOUND
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Получить заказ по id
+      tags:
+      - orders
+  /api/v1/orders/{id}/history:
+    get:
+      description: Записи идут в порядке изменения, первая — new.
+      parameters:
+      - description: Номер заказа
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/order.StatusChange'
+            type: array
+        "400":
+          description: INVALID_ID
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: ORDER_NOT_FOUND
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: История статусов заказа
+      tags:
+      - orders
+  /api/v1/orders/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        Разрешены переходы: new → processing, new → cancelled,
+        processing → completed, processing → cancelled.
+        Из completed и cancelled перейти никуда нельзя.
+      parameters:
+      - description: Номер заказа
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      - description: Новый статус
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/order.UpdateStatusInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/order.Order'
+        "400":
+          description: INVALID_ID, INVALID_JSON или INVALID_STATUS
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: ORDER_NOT_FOUND
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "409":
+          description: INVALID_STATUS_TRANSITION
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Изменить статус заказа
+      tags:
+      - orders
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{"status": "ok"}'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Проверка, что сервис жив
+      tags:
+      - health
+swagger: "2.0"

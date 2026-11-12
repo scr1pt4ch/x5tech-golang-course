@@ -12,31 +12,85 @@ import (
 	"example.com/order-service/internal/repository/memory"
 )
 
-func TestOrderRepository_CreateAssignsSequentialIDs(t *testing.T) {
-	repo := memory.NewOrderRepository()
-	ctx := context.Background()
+func TestOrderRepositoryCreateAssignsSequentialIDs(t *testing.T) {
+	tests := []struct {
+		name    string
+		inputs  []order.Order
+		wantIDs []int64
+	}{
+		{"один заказ, свой ID игнорируется", []order.Order{{ID: 100}}, []int64{1}},
+		{"три заказа подряд", []order.Order{{}, {}, {}}, []int64{1, 2, 3}},
+	}
 
-	first, err := repo.Create(ctx, order.Order{ID: 100})
-	require.NoError(t, err)
-	second, err := repo.Create(ctx, order.Order{})
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := memory.NewOrderRepository()
 
-	assert.Equal(t, int64(1), first.ID)
-	assert.Equal(t, int64(2), second.ID)
+			for i, input := range tt.inputs {
+				created, err := repo.Create(context.Background(), input)
+
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantIDs[i], created.ID)
+			}
+		})
+	}
 }
 
-func TestOrderRepository_NotFound(t *testing.T) {
-	repo := memory.NewOrderRepository()
-	ctx := context.Background()
+func TestOrderRepositoryNotFound(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(repo *memory.OrderRepository) error
+	}{
+		{"GetByID", func(repo *memory.OrderRepository) error {
+			_, err := repo.GetByID(context.Background(), 42)
+			return err
+		}},
+		{"Update", func(repo *memory.OrderRepository) error {
+			_, err := repo.Update(context.Background(), order.Order{ID: 42})
+			return err
+		}},
+	}
 
-	_, err := repo.GetByID(ctx, 42)
-	assert.ErrorIs(t, err, order.ErrOrderNotFound)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call(memory.NewOrderRepository())
 
-	_, err = repo.Update(ctx, order.Order{ID: 42})
-	assert.ErrorIs(t, err, order.ErrOrderNotFound)
+			assert.ErrorIs(t, err, order.ErrOrderNotFound)
+		})
+	}
 }
 
-func TestOrderRepository_Update(t *testing.T) {
+func TestOrderRepositoryList(t *testing.T) {
+	tests := []struct {
+		name    string
+		create  int
+		wantLen int
+	}{
+		{"пустой репозиторий", 0, 0},
+		{"один заказ", 1, 1},
+		{"три заказа", 3, 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := memory.NewOrderRepository()
+			ctx := context.Background()
+
+			for i := 0; i < tt.create; i++ {
+				_, err := repo.Create(ctx, order.Order{})
+				require.NoError(t, err)
+			}
+
+			list, err := repo.List(ctx)
+
+			require.NoError(t, err)
+			assert.NotNil(t, list)
+			assert.Len(t, list, tt.wantLen)
+		})
+	}
+}
+
+func TestOrderRepositoryUpdate(t *testing.T) {
 	repo := memory.NewOrderRepository()
 	ctx := context.Background()
 
@@ -47,52 +101,48 @@ func TestOrderRepository_Update(t *testing.T) {
 	_, err = repo.Update(ctx, created)
 	require.NoError(t, err)
 
-	list, err := repo.List(ctx)
-	require.NoError(t, err)
-	require.Len(t, list, 1)
-	assert.Equal(t, order.StatusProcessing, list[0].Status)
-}
-
-func TestOrderRepository_EmptyList(t *testing.T) {
-	list, err := memory.NewOrderRepository().List(context.Background())
-
-	require.NoError(t, err)
-	assert.NotNil(t, list)
-	assert.Empty(t, list)
-}
-
-func TestOrderRepository_CreateCopiesInput(t *testing.T) {
-	repo := memory.NewOrderRepository()
-	ctx := context.Background()
-
-	items := []order.Item{{Name: "Keyboard", Quantity: 1, Price: 500000}}
-	created, err := repo.Create(ctx, order.Order{Items: items})
-	require.NoError(t, err)
-
-	items[0].Price = 1
-
 	stored, err := repo.GetByID(ctx, created.ID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(500000), stored.Items[0].Price)
+	assert.Equal(t, order.StatusProcessing, stored.Status)
 }
 
-func TestOrderRepository_GetByIDReturnsCopy(t *testing.T) {
-	repo := memory.NewOrderRepository()
-	ctx := context.Background()
+func TestOrderRepositoryCopies(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(input, fetched order.Order)
+	}{
+		{"меняем входной заказ после Create", func(input, _ order.Order) {
+			input.Items[0].Price = 1
+			input.History[0].Status = order.StatusCancelled
+		}},
+		{"меняем заказ, полученный из GetByID", func(_, fetched order.Order) {
+			fetched.Items[0].Price = 1
+			fetched.History[0].Status = order.StatusCancelled
+		}},
+	}
 
-	created, err := repo.Create(ctx, order.Order{
-		Items:   []order.Item{{Name: "Keyboard", Quantity: 1, Price: 500000}},
-		History: []order.StatusChange{{Status: order.StatusNew, ChangedAt: time.Now()}},
-	})
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := memory.NewOrderRepository()
+			ctx := context.Background()
 
-	fetched, err := repo.GetByID(ctx, created.ID)
-	require.NoError(t, err)
-	fetched.Items[0].Price = 100
-	fetched.History[0].Status = order.StatusCancelled
+			input := order.Order{
+				Items:   []order.Item{{Name: "Keyboard", Quantity: 1, Price: 500000}},
+				History: []order.StatusChange{{Status: order.StatusNew, ChangedAt: time.Now()}},
+			}
 
-	again, err := repo.GetByID(ctx, created.ID)
-	require.NoError(t, err)
-	assert.Equal(t, int64(500000), again.Items[0].Price)
-	assert.Equal(t, order.StatusNew, again.History[0].Status)
+			created, err := repo.Create(ctx, input)
+			require.NoError(t, err)
+
+			fetched, err := repo.GetByID(ctx, created.ID)
+			require.NoError(t, err)
+
+			tt.change(input, fetched)
+
+			again, err := repo.GetByID(ctx, created.ID)
+			require.NoError(t, err)
+			assert.Equal(t, int64(500000), again.Items[0].Price)
+			assert.Equal(t, order.StatusNew, again.History[0].Status)
+		})
+	}
 }

@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 
+	_ "example.com/order-service/docs"
 	"example.com/order-service/internal/order"
 	"github.com/go-chi/chi/v5"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 type OrderService interface {
@@ -26,10 +28,19 @@ type Handler struct {
 func NewRouter(service OrderService, logger *slog.Logger) http.Handler {
 	h := &Handler{service: service, logger: logger}
 	router := chi.NewRouter()
-	router.Use(recoveryMiddleware(logger))
 	router.Use(requestLoggingMiddleware(logger))
+	router.Use(recoveryMiddleware(logger))
+
+	router.NotFound(func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotFound, "route not found", "ROUTE_NOT_FOUND")
+	})
+	router.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+	})
 
 	router.Get("/health", h.health)
+	router.Get("/swagger/*", httpSwagger.Handler(httpSwagger.URL("/swagger/doc.json")))
+
 	router.Route("/api/v1/orders", func(r chi.Router) {
 		r.Post("/", h.createOrder)
 		r.Get("/", h.listOrders)
@@ -41,6 +52,12 @@ func NewRouter(service OrderService, logger *slog.Logger) http.Handler {
 	return router
 }
 
+// health godoc
+// @Summary  Проверка, что сервис жив
+// @Tags     health
+// @Produce  json
+// @Success  200  {object}  map[string]string  "{"status": "ok"}"
+// @Router   /health [get]
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
