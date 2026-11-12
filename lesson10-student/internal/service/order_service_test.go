@@ -58,7 +58,7 @@ func (d *dummyRepository) addOrder(status order.Status) int64 {
 	d.orders = append(d.orders, order.Order{
 		ID:      id,
 		Status:  status,
-		History: []order.StatusChange{{Status: status, ChangedAt: time.Now()}},
+		History: []order.StatusChange{{Status: status, ChangedAt: time.Now().UTC()}},
 	})
 	return id
 }
@@ -68,13 +68,14 @@ func TestCreate(t *testing.T) {
 
 	created, err := svc.Create(context.Background(), order.CreateOrderInput{
 		Items: []order.Item{
-			{Name: "Keyboard", Quantity: 1, Price: 500000},
+			{Name: "     Keyboard", Quantity: 1, Price: 500000},
 			{Name: "Mouse", Quantity: 2, Price: 150000},
 		},
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), created.ID)
+	assert.Equal(t, "Keyboard", created.Items[0].Name)
 	assert.Equal(t, order.StatusNew, created.Status)
 	assert.Equal(t, int64(800000), created.TotalPrice)
 	require.Len(t, created.History, 1)
@@ -180,4 +181,22 @@ func TestHistory(t *testing.T) {
 	assert.Equal(t, order.StatusCompleted, history[2].Status)
 	assert.False(t, history[2].ChangedAt.Before(history[1].ChangedAt))
 	assert.False(t, history[1].ChangedAt.Before(history[0].ChangedAt))
+}
+
+func TestUpdateStatus_UnknownStatus(t *testing.T) {
+	repo := newDummyRepository()
+	id := repo.addOrder(order.StatusNew)
+	svc := service.NewOrderService(repo)
+
+	_, err := svc.UpdateStatus(context.Background(), id, "shipped")
+
+	assert.ErrorIs(t, err, order.ErrInvalidStatus)
+}
+
+func TestHistory_NotFound(t *testing.T) {
+	svc := service.NewOrderService(newDummyRepository())
+
+	_, err := svc.History(context.Background(), 999)
+
+	assert.ErrorIs(t, err, order.ErrOrderNotFound)
 }

@@ -22,28 +22,34 @@ func (s *OrderService) Create(ctx context.Context, input order.CreateOrderInput)
 		return order.Order{}, fmt.Errorf("%w: order must have at least one item", order.ErrInvalidOrder)
 	}
 
+	items := make([]order.Item, 0, len(input.Items))
+
 	var total int64
 
 	for i, item := range input.Items {
-		if "" == strings.TrimSpace(item.Name) {
-			return order.Order{}, fmt.Errorf("%w: item %d: empty name", order.ErrInvalidOrder, i)
-		}
+		num := i + 1
 
+		item.Name = strings.TrimSpace(item.Name)
+
+		if "" == item.Name {
+			return order.Order{}, fmt.Errorf("%w: item %d: empty name", order.ErrInvalidOrder, num)
+		}
 		if item.Quantity <= 0 {
-			return order.Order{}, fmt.Errorf("%w: item %d: quantity <= 0", order.ErrInvalidOrder, i)
+			return order.Order{}, fmt.Errorf("%w: item %d: quantity <= 0", order.ErrInvalidOrder, num)
 		}
 
 		if item.Price <= 0 {
-			return order.Order{}, fmt.Errorf("%w, item %d: price <= 0", order.ErrInvalidOrder, i)
+			return order.Order{}, fmt.Errorf("%w, item %d: price <= 0", order.ErrInvalidOrder, num)
 		}
 
 		total += item.Price * int64(item.Quantity)
+		items = append(items, item)
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 
 	newOrder := order.Order{
-		Items:      input.Items,
+		Items:      items,
 		TotalPrice: total,
 		Status:     order.StatusNew,
 		CreatedAt:  now,
@@ -88,7 +94,7 @@ func (s *OrderService) UpdateStatus(ctx context.Context, id int64, status order.
 
 	curr.History = append(curr.History, order.StatusChange{
 		Status:    status,
-		ChangedAt: time.Now(),
+		ChangedAt: time.Now().UTC(),
 	})
 
 	updated, err := s.repository.Update(ctx, curr)

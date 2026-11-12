@@ -10,6 +10,12 @@ import (
 	"example.com/order-service/internal/service"
 )
 
+// @title        Order Service API
+// @version      1.0
+// @description  Учебный сервис заказов: создание заказа, смена статуса и история статусов.
+// @description  Заказы хранятся в памяти и пропадают после перезапуска.
+// @description  Все ошибки приходят в формате {"error": "...", "code": "..."}.
+// @BasePath     /
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	repository := memory.NewOrderRepository()
