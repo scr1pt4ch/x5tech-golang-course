@@ -62,7 +62,7 @@ func (r *OrderRepository) Update(_ context.Context, value order.Order) (order.Or
 	return order.Order{}, fmt.Errorf("order %d: %w", value.ID, order.ErrOrderNotFound)
 }
 
-// Нужен, чтобы потом было проще добавить работу с бд, да и в общем для идиоматичности
+// Инкапсулируем, чтобы нельзя было менять заказы внутри репозитория
 func cloneOrder(o order.Order) order.Order {
 	cloned := o
 

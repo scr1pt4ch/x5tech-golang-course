@@ -45,7 +45,7 @@ func requestLoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handl
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.Int("status", rec.status),
-				slog.Float64("duration_ms", durationMs),
+				slog.Float64("duration", durationMs),
 				slog.String("request_id", requestID),
 			)
 		})

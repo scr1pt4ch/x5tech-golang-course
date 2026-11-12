@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -157,7 +158,7 @@ func idFromURL(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 
 	if nil != err || id <= 0 {
-		writeError(w, http.StatusBadRequest, "id <= 0", "INVALID_ID")
+		writeError(w, http.StatusBadRequest, "id must be a positive integer", "INVALID_ID")
 		return 0, false
 	}
 
@@ -169,7 +170,12 @@ func readBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(dst); nil != err {
-		writeError(w, http.StatusBadRequest, "request body invalid JSON", "INVALID_JSON")
+		writeError(w, http.StatusBadRequest, "request body must be valid JSON", "INVALID_JSON")
+		return false
+	}
+
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "request body must contain one JSON object", "INVALID_JSON")
 		return false
 	}
 
@@ -177,20 +183,26 @@ func readBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 }
 
 var errorCodes = []struct {
-	target error
-	status int
-	code   string
+	target  error
+	status  int
+	code    string
+	message string
 }{
-	{order.ErrInvalidOrder, http.StatusBadRequest, "INVALID_ORDER"},
-	{order.ErrInvalidStatus, http.StatusBadRequest, "INVALID_STATUS"},
-	{order.ErrOrderNotFound, http.StatusNotFound, "ORDER_NOT_FOUND"},
-	{order.ErrInvalidStatusTransition, http.StatusConflict, "INVALID_STATUS_TRANSITION"},
+	{order.ErrInvalidOrder, http.StatusBadRequest, "INVALID_ORDER", ""},
+	{order.ErrInvalidStatus, http.StatusBadRequest, "INVALID_STATUS", ""},
+	{order.ErrOrderNotFound, http.StatusNotFound, "ORDER_NOT_FOUND", "order not found"},
+	{order.ErrInvalidStatusTransition, http.StatusConflict, "INVALID_STATUS_TRANSITION", ""},
 }
 
 func (h *Handler) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	for _, e := range errorCodes {
 		if errors.Is(err, e.target) {
-			writeError(w, e.status, err.Error(), e.code)
+			message := e.message
+			if "" == message {
+				message = err.Error()
+			}
+
+			writeError(w, e.status, message, e.code)
 			return
 		}
 	}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -39,10 +40,21 @@ func (s *OrderService) Create(ctx context.Context, input order.CreateOrderInput)
 		}
 
 		if item.Price <= 0 {
-			return order.Order{}, fmt.Errorf("%w, item %d: price <= 0", order.ErrInvalidOrder, num)
+			return order.Order{}, fmt.Errorf("%w: item %d: price <= 0", order.ErrInvalidOrder, num)
 		}
 
-		total += item.Price * int64(item.Quantity)
+		if math.MaxInt64/int64(item.Quantity) < item.Price {
+			return order.Order{}, fmt.Errorf("%w: item %d: price * quantity is too large", order.ErrInvalidOrder, num)
+		}
+
+		amount := item.Price * int64(item.Quantity)
+
+		if math.MaxInt64-amount < total {
+			return order.Order{}, fmt.Errorf("%w: total price is too large", order.ErrInvalidOrder)
+		}
+
+		total += amount
+
 		items = append(items, item)
 	}
 
@@ -131,7 +143,6 @@ func canTransit(from, to order.Status) bool {
 	return false
 }
 
-// Пока что захардкожено, потом сделаю красивее
 func isKnownStatus(status order.Status) bool {
 	switch status {
 	case order.StatusNew, order.StatusProcessing, order.StatusCompleted, order.StatusCancelled:
