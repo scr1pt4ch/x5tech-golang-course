@@ -1,0 +1,204 @@
+basePath: /api/v1
+definitions:
+  httpapi.CreateOrderRequest:
+    properties:
+      customer:
+        example: Алиса
+        minLength: 1
+        type: string
+    required:
+    - customer
+    type: object
+  httpapi.ErrorResponse:
+    properties:
+      code:
+        example: VALIDATION_ERROR
+        type: string
+      error:
+        example: customer is required
+        type: string
+    required:
+    - code
+    - error
+    type: object
+  httpapi.OrderResponse:
+    properties:
+      customer:
+        example: Алиса
+        type: string
+      id:
+        example: 1
+        minimum: 1
+        type: integer
+      status:
+        enum:
+        - new
+        - cancelled
+        example: new
+        type: string
+    required:
+    - customer
+    - id
+    - status
+    type: object
+  httpapi.StatusResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+    required:
+    - status
+    type: object
+info:
+  contact: {}
+  description: |-
+    Учебный сервис заказов. Заказы хранятся в памяти и пропадают после перезапуска.
+    Все ошибки под /api/v1/ приходят в формате {"error": "...", "code": "..."}.
+    GET-маршруты также принимают HEAD.
+  title: Orders API
+  version: "1.0"
+paths:
+  /orders:
+    get:
+      description: |-
+        Заказы отсортированы по id по возрастанию. Пустая выборка и страница за концом списка - [].
+        Числа передаются только десятичными цифрами. Неверное, пустое, повторное или неизвестное
+        значение параметра - 400 INVALID_QUERY (значение по умолчанию вместо него не подставляется).
+      parameters:
+      - default: 20
+        description: Размер страницы
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      - default: 0
+        description: Сколько заказов пропустить
+        in: query
+        minimum: 0
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/httpapi.OrderResponse'
+            type: array
+        "400":
+          description: INVALID_QUERY
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "405":
+          description: METHOD_NOT_ALLOWED
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      summary: Список заказов с пагинацией
+      tags:
+      - orders
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Тело - один JSON-объект с полем customer, не больше 1024 байт.
+        Пробелы по краям имени обрезаются. Сервер сам назначает id и status=new.
+        Повторные заказы одного клиента разрешены.
+      parameters:
+      - description: Данные заказа
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.CreateOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              description: Адрес нового заказа, например /api/v1/orders/1
+              type: string
+          schema:
+            $ref: '#/definitions/httpapi.OrderResponse'
+        "400":
+          description: INVALID_JSON или VALIDATION_ERROR
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "405":
+          description: METHOD_NOT_ALLOWED
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "413":
+          description: BODY_TOO_LARGE
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "415":
+          description: UNSUPPORTED_MEDIA_TYPE
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      summary: Создать заказ
+      tags:
+      - orders
+  /orders/{id}:
+    get:
+      parameters:
+      - description: Номер заказа
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.OrderResponse'
+        "400":
+          description: INVALID_ID
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "404":
+          description: ORDER_NOT_FOUND
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "405":
+          description: METHOD_NOT_ALLOWED
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: INTERNAL_ERROR
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      summary: Получить заказ по номеру
+      tags:
+      - orders
+  /status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.StatusResponse'
+        "405":
+          description: METHOD_NOT_ALLOWED
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      summary: Проверка, что сервис работает
+      tags:
+      - status
+swagger: "2.0"
